@@ -1,0 +1,21 @@
+var sentinel=ee.ImageCollection("COPERNICUS/S2_SR")
+
+var senti_filter=sentinel.filterBounds(aoi).filterDate('2019-09-01','2020-03-30')
+
+var cloud_filter=senti_filter.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE',05)).first()
+
+
+var nir=cloud_filter.select('B8')
+
+var swir=cloud_filter.select('B11')
+
+
+
+var nbi= (nir.subtract(swir)).divide(nir.add(swir))
+
+Map.addLayer(nbi,{min:0,max:0.5,palette:['984ea3','4daf4a','377eb8','e41a1c']},'NBI')
+
+Map.addLayer(cloud_filter)
+
+
+
