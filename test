@@ -118,7 +118,7 @@ Map.addLayer(roi)
 
 // Name of image from Otsu Method = Water
 
-Map.addLayer(check1)
+Map.addLayer(check1,{},'FirstCHeck')
 
 
 // Create coordinate transform
@@ -126,23 +126,20 @@ Map.addLayer(check1)
 var proj = water.projection()
 var scale = proj.nominalScale()
 
-var roiConform = roi.reduceToImage({
-  properties: ['OBJECTID'],
-  reducer: ee.Reducer.first()
-}).reproject(proj).reduceToVectors({
-    geometry: roi,
-    crs: proj,
-    scale: scale,
-    geometryType: 'polygon',
-    eightConnected: false
-  })
+var roiConform  = roi.geometry().transform(proj, 0.001);
+
+//Map.addLayer(roiConform)
 
 water = water.clip(roiConform)
-check1 = check1.clip(roiConform).reproject(ee.Projection('EPSG:4326').getInfo().crs).eq(1)
+check1 = check1.reproject(ee.Projection('EPSG:4326').getInfo().crs)
+Map.addLayer(check1,{},'CHeck2')
+check1 = check1.clip(roiConform)
+check1 = check1.eq(1)
 print(check1,'check')
 print(water,'wat')
-Map.addLayer(check1)
-Map.addLayer(water)
+Map.addLayer(water,{},'Water')
+Map.addLayer(check1,{},'Check')
+
 
 // Create Comarison MAtrix
 
