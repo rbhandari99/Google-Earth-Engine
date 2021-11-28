@@ -1,0 +1,158 @@
+
+
+// Data
+
+
+var collectionVH = ee.ImageCollection('COPERNICUS/S1_GRD')
+.filter(ee.Filter.eq('instrumentMode', 'IW'))
+.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+.filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'))
+.filterMetadata('resolution_meters', 'equals' , 10)
+.filterBounds(roi)
+.select('VH');
+print(collectionVH, 'Collection VH');
+
+
+var afterVH = collectionVH.filterDate('2018-04-08', '2018-04-15').median();
+print(afterVH)
+Map.addLayer(afterVH, {min:-25,max:0}, 'After flood VH', 0);
+
+
+Map.setCenter(85.49,26.92, 8)
+
+//Apply Filter
+var SMOOTHING_RADIUS = 50;
+var afterVH_filtered = afterVH.focal_mean(SMOOTHING_RADIUS, 'circle', 'meters');
+
+//Display filtered images
+
+Map.addLayer(afterVH_filtered, {min:-25,max:0}, 'After Flood VH Filtered',0);
+
+
+// Display Histogram
+
+var histogram =afterVH_filtered.select('VH').reduceRegion({
+  reducer: ee.Reducer.histogram(255, 2),
+  geometry: roi, 
+  scale: 30,
+  // maxPixels: 1e13,
+  bestEffort: true
+});
+print(histogram);
+
+print(Chart.image.histogram(afterVH_filtered.select('VH'), roi, 20));
+
+
+
+// OTSU Algorithm
+
+// Calculation for the threshold using otsu method (Bimodal histogram)
+
+
+var otsu = function(histogram) {
+  var counts = ee.Array(ee.Dictionary(histogram).get('histogram'));
+  var means = ee.Array(ee.Dictionary(histogram).get('bucketMeans'));
+  var size = means.length().get([0]);
+  var total = counts.reduce(ee.Reducer.sum(), [0]).get([0]);
+  var sum = means.multiply(counts).reduce(ee.Reducer.sum(), [0]).get([0]);
+  var mean = sum.divide(total);
+  
+  var indices = ee.List.sequence(1, size);
+  
+  // Compute between sum of squares, where each mean partitions the data.
+  var bss = indices.map(function(i) {
+    var aCounts = counts.slice(0, 0, i);
+    var aCount = aCounts.reduce(ee.Reducer.sum(), [0]).get([0]);
+    var aMeans = means.slice(0, 0, i);
+    var aMean = aMeans.multiply(aCounts)
+        .reduce(ee.Reducer.sum(), [0]).get([0])
+        .divide(aCount);
+    var bCount = total.subtract(aCount);
+    var bMean = sum.subtract(aCount.multiply(aMean)).divide(bCount);
+    return aCount.multiply(aMean.subtract(mean).pow(2)).add(
+           bCount.multiply(bMean.subtract(mean).pow(2)));
+  });
+  
+  print(ui.Chart.array.values(ee.Array(bss), 0, means));
+  
+  // Return the mean value corresponding to the maximum BSS.
+  return means.sort(bss).get([-1]);
+};
+
+var threshold = otsu(histogram.get('VH'));
+print('threshold', threshold);
+
+
+var water = afterVH_filtered.select('VH').lt(threshold);
+
+var alos = alos.select('AVE_DSM').rename('elev')
+var slope = alos.addBands(ee.Terrain.slope(alos), ['slope']);
+
+
+//JRC water 
+//var jrc_water=ee.ImageCollection("JRC/GSW1_3/YearlyHistory")
+//var jr=ee.ImageCollection("JRC/GSW1_3/MonthlyHistory").select('water')
+
+
+
+// Map.addLayer(slope)
+var water = water.updateMask(slope.select('slope').lt(2)).clip(roi)
+
+
+Map.addLayer(afterVH_filtered.select('VH'),{min: -20, max: -1},'S1_Image')
+Map.addLayer(water.selfMask(), {palette: 'Blue'}, 'Flood');
+
+
+// Export the image, specifying scale and region.
+Export.image.toDrive({
+image: water.selfMask(),
+description: 'Flood', 
+scale: 10,
+region: roi,
+fileFormat: 'GeoTIFF',
+});
+
+//Map.addLayer(roi1)
+Map.addLayer(roi)
+//Map.addLayer(jr)
+
+// Name of image from Otsu Method = Water
+
+Map.addLayer(check1)
+
+
+// Create coordinate transform
+
+var proj = water.projection()
+var scale = proj.nominalScale()
+
+var roiConform = roi.reduceToImage({
+  properties: ['OBJECTID'],
+  reducer: ee.Reducer.first()
+}).reproject(proj).reduceToVectors({
+    geometry: roi,
+    crs: proj,
+    scale: scale,
+    geometryType: 'polygon',
+    eightConnected: false
+  })
+
+water = water.clip(roiConform)
+check1 = check1.clip(roiConform).reproject(ee.Projection('EPSG:4326').getInfo().crs).eq(1)
+print(check1,'check')
+print(water,'wat')
+Map.addLayer(check1)
+Map.addLayer(water)
+
+// Create Comarison MAtrix
+
+
+var added = water.addBands(check1)
+var sample= added.sample(roiConform)
+
+var classList=ee.List.sequence(1,2)
+var tMatrix =sample.errorMatrix('water','check',classList)
+print('Transition matrix: ', tMatrix)
+print('% area change: ', ee.Number(1).subtract(tMatrix.accuracy()).multiply(100))
+
+
